@@ -1,0 +1,38 @@
+Overview
+--------
+
+An unofficial ReCodEx terminal client written in Perl6/Raku by Lukáš Ondráček;
+use under GNU GPLv3.
+
+Features:
+	* list your groups;
+	* list assignments in a group;
+	* list students with a brief list of their submissions for an assignment;
+	* list submissions of a student for an assignment with the whole chat;
+	* open a specified submission in a configured app;
+	* write a comment / assign points / mark solution as accepted.
+
+The brief list of submissions consists of texts such as C[8+1|....o].
+The first letter is a state: Correct/Wrong/Accepted.
+In braces there can be:
+	* number of points, and/or
+	* chat history -- one character per message: Outgoing/Incoming/Private/.unknown.
+
+
+Install
+-------
+
+Install rakudo and zef, then install perl6 packages JSON::Tiny and HTTP::UserAgent via zef.
+Copy recodex-conf.p6 to ~/.config/ and modify it as you need.
+Generate read-write token in web interface and save it to ~/.config/recodex-token.txt.
+Use recodex.p6 to access submitted solutions, read/write their comments, and assign points to them.
+
+
+Usage
+-----
+
+recodex.p6 -r
+	...refresh recodex token.
+
+recodex.p6
+	...run in interactive mode.
