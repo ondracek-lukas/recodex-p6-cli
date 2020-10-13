@@ -238,7 +238,8 @@ multi MAIN {
 
 			@students.=sort({ $_<solutions>[*-1]<lastStudentActionAt> // $_<fullName> });
 			for @students.rotor(2=>-1) {
-				$_[0]<label> ~= "\n" if defined ([^] $_)<solutions>[*-1]<lastStudentActionAt>;
+				# $_[0]<label> ~= "\n" if defined ([^] $_)<solutions>[*-1]<lastStudentActionAt>; # XXX not working
+				$_[0]<label> ~= "\n" if (defined $_[0]<solutions>[*-1]<lastStudentActionAt>) ?^ (defined $_[1]<solutions>[*-1]<lastStudentActionAt>);
 			}
 			try @students[*-1]<label> ~= "\n";
 
