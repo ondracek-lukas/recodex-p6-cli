@@ -3,9 +3,10 @@
 
 use v6;
 use JSON::Tiny;
-#use Data::Dump;
 use HTTP::UserAgent;
 
+#my $debug = False;
+#use Data::Dump;
 
 # read configuration from ~/.config/recodex-conf.p6
 my %conf = "%*ENV<HOME>/.config/recodex-conf.p6".IO.slurp.EVAL;
@@ -17,6 +18,8 @@ my $token = %conf<tokenFile>.IO.slurp.trim;
 
 # each access to ReCodEx uses this function
 sub request(Str $path, Bool:D :$raw = False, Hash :$post-data, Bool:D :$delete = False) {
+	#"++".print if $debug;
+	#$path.say if $debug;
 	state $ua = HTTP::UserAgent.new;
 	my $res;
 	if $delete {
@@ -26,6 +29,8 @@ sub request(Str $path, Bool:D :$raw = False, Hash :$post-data, Bool:D :$delete =
 	} else {
 		$res = $ua.get("%conf<recodexUrl>/api/v1/$path", :Authorization("Bearer $token"));
 	}
+	#"--".print if $debug;
+	#say Dump from-json $res.content if $debug;
 	die unless $res.is-success;
 	return $res.content if $raw;
 	$res = from-json $res.content;
@@ -35,7 +40,7 @@ sub request(Str $path, Bool:D :$raw = False, Hash :$post-data, Bool:D :$delete =
 }
 
 sub requestFile(Str $id, Str $path) {
-	spurt $path, request("uploaded-files/$id/download", :raw), :bin;
+	spurt $path, request("uploaded-files/$id/content")<content>;
 	return $path;
 }
 
@@ -174,8 +179,12 @@ multi MAIN {
 			choose {
 				$group = @groups[$_-1] or fail;
 			}, @groups>><label>;
-			@students = |request("groups/$group<id>/students");
-			%studentsById = @students.map({$_<id> => $_});
+			@students = [];
+			for |$group<privateData><students> {
+				my $student = request("users/$_");
+				@students.push: $student;
+				%studentsById{$_} = $student;
+			}
 			"assignments";
 		}
 
@@ -203,30 +212,35 @@ multi MAIN {
 			my @solutions = |request("exercise-assignments/$assignment<id>/solutions");
 
 			$_<solutions> = [] for @students;
-			%studentsById{$_<solution><userId>}<solutions>.push: $_ for @solutions;
+			%studentsById{$_<authorId>}<solutions>.push: $_ for @solutions;
 
 			for @students {
+				my $lastStudentActionAt = 0; # correct (not accepted) submission, message
+				my $lastTeacherActionAt = 0; # message only
 				given $_<solutions> {
-					$_=.sort({$_<solution><createdAt>}).Array;
+					$_=.sort({$_<createdAt>}).Array;
 					for |$_ {
 						$_<stat> = $_<lastSubmission><isCorrect> ?? "C" !! "W";
 						$_<stat> = "A" if $_<accepted>;
-						$_<lastStudentActionAt> = $_<solution><createdAt> if $_<stat> eq "C";
+						$lastStudentActionAt max= $_<createdAt> if $_<stat> eq "C";
 						my @info;
+						$_<actualPoints> //= 0;
 						$_<strPoints> = $_<actualPoints> ~ ("+" x ($_<bonusPoints> > 0)) ~ ($_<bonusPoints> || "");
 						if $_<actualPoints> > 0 or $_<bonusPoints> != 0 {
 							@info.push: $_<strPoints>;
 						}
 						if $_<commentsStats> {
-							$_<lastStudentActionAt> = Nil;
 							my $comments = "." x ($_<commentsStats><count>-1);
-							if $_<commentsStats><last><user><id> eq $_<solution><userId> {
+							if $_<commentsStats><last><user><id> eq $_<authorId> {
 								$comments ~= "i";
 								$_<lastStudentActionAt> = $_<commentsStats><last><postedAt>;
+								$lastStudentActionAt max= $_<commentsStats><last><postedAt>;
 							} elsif $_<commentsStats><last><isPrivate> {
 								$comments ~= "p";
+								$lastTeacherActionAt max= $_<commentsStats><last><postedAt>;
 							} else {
 								$comments ~= "o";
+								$lastTeacherActionAt max= $_<commentsStats><last><postedAt>;
 							}
 							@info.push: $comments;
 						}
@@ -234,12 +248,13 @@ multi MAIN {
 					}
 				}
 				$_<label> = sprintf("%-30s", $_<fullName>) ~ $_<solutions>.map({escColor($_<stat>, $_<statDesc>)}).join(" ");
+				$_<lastStudentActionAt> = $lastStudentActionAt > $lastTeacherActionAt ?? $lastStudentActionAt !! Nil;
 			}
 
-			@students.=sort({ $_<solutions>[*-1]<lastStudentActionAt> // $_<fullName> });
+			@students.=sort({ $_<lastStudentActionAt> // $_<fullName> });
 			for @students.rotor(2=>-1) {
 				# $_[0]<label> ~= "\n" if defined ([^] $_)<solutions>[*-1]<lastStudentActionAt>; # XXX not working
-				$_[0]<label> ~= "\n" if (defined $_[0]<solutions>[*-1]<lastStudentActionAt>) ?^ (defined $_[1]<solutions>[*-1]<lastStudentActionAt>);
+				$_[0]<label> ~= "\n" if (defined $_[0]<lastStudentActionAt>) ?^ (defined $_[1]<lastStudentActionAt>);
 			}
 			try @students[*-1]<label> ~= "\n";
 
@@ -263,7 +278,7 @@ multi MAIN {
 
 			# update for the case of modification or adding comments
 			$student<solutions> = request("exercise-assignments/$assignment<id>/users/$student<id>/solutions")
-				.sort({$_<solution><createdAt>}).Array;
+				.sort({$_<createdAt>}).Array;
 			
 		
 			for |$student<solutions> {
@@ -280,7 +295,7 @@ multi MAIN {
 
 				$_<label> =
 					sprintf "%s  %3d%%  %8s  %s",
-						formatDate($_<solution><createdAt>),
+						formatDate($_<createdAt>),
 						$_<lastSubmission><evaluation><score>*100,
 						"$_<strPoints>/$_<maxPoints>",
 						"$_<runtimeEnvironmentId>" ~
@@ -300,6 +315,7 @@ multi MAIN {
 				$_<desc> = escColor($_<stat>, $_<label>) ~ $_<strComments>.indent(9);
 				$_<descPlain> = $_<label> ~ $_<strComments>;
 				++state $i;
+				$_<solution><files> = request("assignment-solutions/$_<lastSubmission><assignmentSolutionId>/files");
 				my $singleFile = $_<solution><files>.elems == 1;
 				$_<solution><localDirName> = safeFileName($student<fullName>, $i) ~ "/" unless $singleFile;
 				for |$_<solution><files> {
