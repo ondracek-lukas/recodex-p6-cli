@@ -40,7 +40,8 @@ sub request(Str $path, Bool:D :$raw = False, Hash :$post-data, Bool:D :$delete =
 }
 
 sub requestFile(Str $id, Str $path) {
-	spurt $path, request("uploaded-files/$id/content")<content>;
+	# spurt $path, request("uploaded-files/$id/content")<content>;
+	spurt $path, request("uploaded-files/$id/download", :raw);
 	return $path;
 }
 
